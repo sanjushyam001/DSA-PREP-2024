@@ -17,7 +17,7 @@ public class TransposeMatrix {
     private static int[][] transpose(int ar[][]) {
 
         for (int i = 0; i < ar.length; i++) {
-            for (int j = i; j < ar[0].length; j++) {
+            for (int j = i; j < ar[i].length; j++) {
                 swap(ar, i, j);
             }
         }
