@@ -1,0 +1,109 @@
+pipeline {
+    
+	agent any
+	
+	tools {
+        maven "MAVEN3.9.6"
+		jdk "OpenJDK8"
+    }
+	environment {
+        NEXUS_VERSION = "nexus3"
+        NEXUS_PROTOCOL = "http"
+        NEXUS_URL = "http://13.201.38.161:8081/"
+        NEXUS_REPOSITORY = "vprofile-repo"
+		
+        NEXUS_CREDENTIAL_ID = "nexuslogin"
+        ARTVERSION = "${env.BUILD_ID}-${env.BUILD_TIMESTAMP}"
+
+        registryCredential = 'ecr:ap-south-1:awscreds'
+        appRegistry = "125529197288.dkr.ecr.ap-south-1.amazonaws.com/vprofileimage"
+        vprofileRegistry = "https://125529197288.dkr.ecr.ap-south-1.amazonaws.com"
+    }
+	
+   stages{
+		   stage('Fetch Code'){
+			   steps{
+				git branch: 'docker',url: 'https://github.com/sanjushyam001/vprofile-project.git'
+			   }
+		   
+		   }
+        
+        stage('Build'){
+            steps {
+                sh 'mvn clean install -DskipTests'
+            }
+            post {
+                success {
+                    echo 'Now Archiving...'
+                    archiveArtifacts artifacts: '**/target/*.war'
+                }
+            }
+        }
+
+		stage('UNIT TESTS'){
+            steps {
+                sh 'mvn test'
+            }
+        }
+		stage ('CODE ANALYSIS WITH CHECKSTYLE'){
+            steps {
+                sh 'mvn checkstyle:checkstyle'
+            }
+            post {
+                success {
+                    echo 'Generated Analysis Result'
+                }
+            }
+        }
+		
+		stage('CODE ANALYSIS with SONARQUBE') {
+          
+		  environment {
+             scannerHome = tool 'SONAR4.7'
+          }
+
+          steps {
+            withSonarQubeEnv('SONAR') {
+               sh '''${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=vprofile \
+                   -Dsonar.projectName=vprofile-repo \
+                   -Dsonar.projectVersion=1.0 \
+                   -Dsonar.sources=src/ \
+                   -Dsonar.java.binaries=target/test-classes/com/visualpathit/account/controllerTest/ \
+                   -Dsonar.junit.reportsPath=target/surefire-reports/ \
+                   -Dsonar.jacoco.reportsPath=target/jacoco.exec \
+                   -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml'''
+            }
+
+            
+          }
+        }
+		stage('Quality Gate'){
+			steps{
+				timeout(time: 1, unit: 'HOURS') {
+					   waitForQualityGate abortPipeline: true
+					}
+				}
+		}
+		
+    stage('Build App Image') {
+       steps {
+       
+         script {
+                dockerImage = docker.build( appRegistry + ":$BUILD_NUMBER", "./Docker-files/app/multistage/")
+             }
+
+     }
+    
+    }
+    stage('Upload App Image') {
+          steps{
+            script {
+              docker.withRegistry( vprofileRegistry, registryCredential ) {
+                dockerImage.push("$BUILD_NUMBER")
+                dockerImage.push('latest')
+              }
+            }
+          }
+     }
+}
+}
